@@ -1,0 +1,17 @@
+[package]
+name = "encsniff"
+homepage = "https://github.com/excelano/encsniff"
+version = "0.1.0"
+edition = "2021"
+description = "Detect common non-UTF-8 text encodings from byte-perfect signatures (UTF-8 BOM, UTF-16 BOMs, UTF-7)"
+license = "MIT"
+authors = ["David M. Anderson"]
+repository = "https://github.com/excelano/encsniff"
+readme = "README.md"
+keywords = ["encoding", "utf-7", "utf-8", "bom", "detection"]
+categories = ["encoding", "text-processing"]
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"
