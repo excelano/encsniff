@@ -1,0 +1,14 @@
+name: ci
+
+# The checks live in excelano/.github. This crate is linked by other code, so
+# it calls the library policy: the binary checks plus the docs and packaging a
+# published crate owes its consumers.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: excelano/.github/.github/workflows/rust-lib-ci.yml@main
