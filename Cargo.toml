@@ -3,6 +3,21 @@ name = "encsniff"
 homepage = "https://github.com/excelano/encsniff"
 version = "0.1.0"
 edition = "2021"
+# Measured, not inferred: the library builds on 1.56, 1.64 and 1.65. Nothing
+# here raises the floor above the edition's own, unlike xaddr, where 1.64 fails
+# on a `let ... else`. So this number is the edition, and it cannot drift
+# upward the way a code-derived floor can — an edition bump would move it
+# deliberately and loudly.
+#
+# `cargo test` needs 1.63, because the tempfile dev-dependency pulls rustix,
+# which declares that floor. That is a constraint on developing this crate, not
+# on using it: a consumer links the library and never builds its dev tree. The
+# promise this line makes is to consumers, so it states what they need.
+#
+# Deliberately no msrv job. The shared rust-lib-ci runs tests, docs and
+# packaging, none of which can run at 1.56 for the reason above, and pinning
+# the job to 1.63 would enforce a number this manifest does not claim.
+rust-version = "1.56"
 description = "Detect common non-UTF-8 text encodings from byte-perfect signatures (UTF-8 BOM, UTF-16 BOMs, UTF-7)"
 license = "MIT"
 authors = ["David M. Anderson"]
