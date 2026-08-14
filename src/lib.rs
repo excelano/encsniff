@@ -20,6 +20,12 @@
 //!             eprintln!("hint: {}", hint);
 //!         }
 //!     }
+//!     Action::WarnUnknown => {
+//!         eprintln!("warning: file is not valid UTF-8, and its encoding could not be named.");
+//!         if let Some(hint) = &s.hint {
+//!             eprintln!("hint: {}", hint);
+//!         }
+//!     }
 //! }
 //! # Ok(())
 //! # }
@@ -40,6 +46,14 @@ pub enum Action {
     StripBom,
     /// Input is a non-UTF-8 encoding the user should know about.
     Warn,
+    /// Input is provably not UTF-8, but which encoding it is could not be
+    /// determined. [`Sniff::encoding`] is `None` — nothing was proven about
+    /// the identity, only about what it is not.
+    ///
+    /// Naming a single-byte encoding would be a guess, and this crate does not
+    /// guess. Saying the bytes are not UTF-8 is not a guess: UTF-8 is a
+    /// decidable grammar and [`std::str::from_utf8`] decides it exactly.
+    WarnUnknown,
 }
 
 /// The detected encoding.
@@ -69,9 +83,21 @@ pub struct Sniff {
     pub action: Action,
     pub encoding: Option<Encoding>,
     pub bom_len: usize,
-    /// Copy-pasteable iconv command. Set by [`sniff_file`] on `Warn`; `None`
-    /// from [`sniff_bytes`] because no path is available.
+    /// Copy-pasteable iconv command. Set by [`sniff_file`] on either warning
+    /// action; `None` from [`sniff_bytes`] because no path is available.
     pub hint: Option<String>,
+}
+
+impl Sniff {
+    /// Whether this result is something the user should be told about.
+    ///
+    /// Prefer this to comparing against [`Action::Warn`]: every consumer in
+    /// the fleet wrote `action != Action::Warn` to mean "nothing to report",
+    /// which silently swallowed [`Action::WarnUnknown`] when it was added.
+    /// A predicate absorbs the next verdict too.
+    pub fn is_warning(&self) -> bool {
+        matches!(self.action, Action::Warn | Action::WarnUnknown)
+    }
 }
 
 /// How far into the input we look for the UTF-7 escape marker. 4 KiB
@@ -124,11 +150,34 @@ pub fn sniff_bytes(b: &[u8]) -> Sniff {
             hint: None,
         };
     }
+    if window_has_invalid_utf8(window) {
+        return Sniff {
+            action: Action::WarnUnknown,
+            encoding: None,
+            bom_len: 0,
+            hint: None,
+        };
+    }
     Sniff {
         action: Action::UseAsIs,
         encoding: None,
         bom_len: 0,
         hint: None,
+    }
+}
+
+/// Whether `window` contains a genuinely invalid UTF-8 byte, as opposed to a
+/// multi-byte sequence cut in half by the end of the scan window.
+///
+/// The distinction is the whole difficulty. `SCAN_WINDOW` is a fixed 4 KiB, so
+/// a character straddling byte 4096 arrives here truncated, and a file that is
+/// perfectly good UTF-8 would be reported as broken. `Utf8Error::error_len`
+/// draws exactly the line needed: `None` means the input ended mid-sequence,
+/// `Some(_)` means a byte that cannot appear where it did.
+fn window_has_invalid_utf8(window: &[u8]) -> bool {
+    match std::str::from_utf8(window) {
+        Ok(_) => false,
+        Err(e) => e.error_len().is_some(),
     }
 }
 
@@ -147,10 +196,14 @@ pub fn sniff_file<P: AsRef<Path>>(path: P) -> io::Result<Sniff> {
     }
     buf.truncate(filled);
     let mut s = sniff_bytes(&buf);
-    if s.action == Action::Warn {
-        if let Some(enc) = s.encoding {
-            s.hint = iconv_command(enc, path);
+    match s.action {
+        Action::Warn => {
+            if let Some(enc) = s.encoding {
+                s.hint = iconv_command(enc, path);
+            }
         }
+        Action::WarnUnknown => s.hint = Some(iconv_guess_command(path)),
+        Action::UseAsIs | Action::StripBom => {}
     }
     Ok(s)
 }
@@ -167,6 +220,22 @@ pub fn iconv_command(enc: Encoding, path: &Path) -> Option<String> {
         path.display(),
         dst.display()
     ))
+}
+
+/// Compose a *suggested* conversion for a file that is provably not UTF-8 but
+/// whose encoding could not be named.
+///
+/// Deliberately worded as something to try rather than as a claim. Every other
+/// hint this crate produces follows a byte-perfect signature and can assert
+/// what the file is; this one follows only the absence of valid UTF-8, and the
+/// two candidates it names are the common cases, not a detection.
+pub fn iconv_guess_command(path: &Path) -> String {
+    let dst = utf8_sibling_path(path);
+    format!(
+        "if this is a legacy export, try: iconv -f WINDOWS-1252 -t UTF-8 {} > {} (or -f LATIN1)",
+        path.display(),
+        dst.display()
+    )
 }
 
 fn iconv_from_name(enc: Encoding) -> Option<&'static str> {
@@ -226,6 +295,97 @@ mod tests {
             sniff_bytes("name,city\nDavid,München\n".as_bytes()),
             s(Action::UseAsIs, None, 0)
         );
+    }
+
+    #[test]
+    fn sniff_bytes_latin1_is_not_use_as_is() {
+        // "café" in Latin-1: 0xE9 is a lone continuation-less lead byte in
+        // UTF-8 terms, so the bytes are decidably not UTF-8.
+        let input = b"name,city\nDavid,caf\xE9\n";
+        assert_eq!(
+            sniff_bytes(input),
+            s(Action::WarnUnknown, None, 0),
+            "a CP1252/Latin-1 export must not assert it is usable as-is"
+        );
+    }
+
+    #[test]
+    fn sniff_bytes_flags_an_invalid_byte_at_the_very_end() {
+        // 0xFF can never appear in UTF-8 at all, so there is no truncation
+        // story that excuses it, even as the last byte.
+        assert_eq!(sniff_bytes(b"ok,\xFF"), s(Action::WarnUnknown, None, 0));
+    }
+
+    #[test]
+    fn sniff_bytes_does_not_flag_a_character_cut_by_the_scan_window() {
+        // The trap the whole check has to survive: a 3-byte character starting
+        // at 4094 leaves two of its bytes inside the window and one outside.
+        // The file is perfectly good UTF-8; only our view of it is truncated.
+        let mut input = vec![b'a'; SCAN_WINDOW - 2];
+        input.extend_from_slice("€".as_bytes()); // E2 82 AC
+        assert_eq!(input.len(), SCAN_WINDOW + 1);
+        assert_eq!(
+            sniff_bytes(&input),
+            s(Action::UseAsIs, None, 0),
+            "a character straddling the window boundary is not a broken file"
+        );
+    }
+
+    #[test]
+    fn sniff_bytes_does_not_flag_a_truncated_character_at_end_of_input() {
+        // Same case reached by a short file rather than by the window: the
+        // input simply stops mid-character.
+        let euro = "€".as_bytes();
+        assert_eq!(sniff_bytes(&euro[..2]), s(Action::UseAsIs, None, 0));
+    }
+
+    #[test]
+    fn sniff_bytes_flags_an_overlong_encoding() {
+        // C0 80 is a two-byte encoding of NUL — well-formed in shape, illegal
+        // in UTF-8. error_len() reports Some, so it is a real error and not a
+        // truncation.
+        assert_eq!(sniff_bytes(b"a\xC0\x80b"), s(Action::WarnUnknown, None, 0));
+    }
+
+    #[test]
+    fn sniff_bytes_does_not_flag_a_lone_high_byte_at_end_of_input() {
+        // Looks like a bug and is not. 0xE9 is a legal lead byte for a 3-byte
+        // sequence, so as the final byte of the input it is indistinguishable
+        // from a character the window cut in half — and the rule is that
+        // truncation is never flagged. Real Latin-1 files are unaffected: 4 KiB
+        // of legacy text puts high bytes in front of ASCII repeatedly, and each
+        // of those is a genuine error. Only a file ending exactly on one is
+        // quiet, which is the price of never crying wolf on a good file.
+        assert_eq!(sniff_bytes(b"caf\xE9"), s(Action::UseAsIs, None, 0));
+        assert_eq!(sniff_bytes(b"caf\xE9\n"), s(Action::WarnUnknown, None, 0));
+    }
+
+    #[test]
+    fn warn_unknown_is_a_warning() {
+        assert!(sniff_bytes(b"caf\xE9\n").is_warning());
+        assert!(sniff_bytes(&[0xFF, 0xFE]).is_warning());
+        assert!(!sniff_bytes(b"plain ascii").is_warning());
+        assert!(!sniff_bytes(&[0xEF, 0xBB, 0xBF]).is_warning());
+    }
+
+    #[test]
+    fn sniff_file_hints_at_conversion_for_an_unnameable_encoding() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("l1.csv");
+        let mut f = fs::File::create(&path).unwrap();
+        f.write_all(b"name\ncaf\xE9\n").unwrap();
+        drop(f);
+
+        let got = sniff_file(&path).unwrap();
+        assert_eq!(got.action, Action::WarnUnknown);
+        assert_eq!(got.encoding, None);
+        let hint = got.hint.expect("an unnameable encoding still earns a hint");
+        assert!(hint.contains("WINDOWS-1252"), "hint was: {hint}");
+        assert!(hint.contains("LATIN1"), "hint was: {hint}");
+        assert!(hint.contains("l1.utf8.csv"), "hint was: {hint}");
+        // Worded as a suggestion, because unlike every other hint here it does
+        // not follow from a signature.
+        assert!(hint.starts_with("if this is"), "hint was: {hint}");
     }
 
     #[test]
