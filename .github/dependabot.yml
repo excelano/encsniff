@@ -1,0 +1,20 @@
+# Dependabot keeps the GitHub Actions used by CI and the crate publish current,
+# so security fixes show up as PRs rather than slipping past.
+#
+# Deliberately no `cargo` block. This crate declares zero dependencies, and an
+# ecosystem with no manifest to scan produces a red weekly run with an opaque
+# "the updater encountered one or more errors" — hit on paxc and again on
+# xinglet.com. Add one here when a real dependency lands, not before.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
