@@ -69,7 +69,10 @@ jobs:
           p = pathlib.Path(sys.argv[1])
           s = p.read_text()
           out = re.sub(r"(?ms)^\[dev-dependencies\].*?(?=^\[|\Z)", "", s)
-          assert "[dev-dependencies]" not in out, "the section survived"
+          # At a line start, which is what the substitution matches. A bare
+          # `in` check finds the words in a comment — this manifest has one
+          # explaining the stripping — and fails on a file that is correct.
+          assert not re.search(r"(?m)^\[dev-dependencies\]", out), "the section survived"
           p.write_text(out)
           print("dev-dependencies stripped")
           STRIP
