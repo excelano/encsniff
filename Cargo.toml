@@ -25,9 +25,12 @@ edition = "2021"
 # makes, and the floor is now verified on every push rather than on the day
 # somebody last remembered to try it.
 #
-# The job builds without the lockfile, which is safe only because this crate has
-# no runtime dependencies: there is nothing for a resolver to choose. A runtime
-# dependency would change that, and the job says so where it does it.
+# The job checks a copy with `[dev-dependencies]` stripped, which is what a
+# consumer actually gets: a published crate hands over `[dependencies]` and
+# never its dev tree, so nobody linking this meets `tempfile`'s floor. Checking
+# the crate as shipped would instead measure `tempfile`'s resolver constraints
+# at 1.56, which is the number this line spends fifteen lines refusing to
+# claim.
 rust-version = "1.56"
 description = "Detect common non-UTF-8 text encodings from byte-perfect signatures (UTF-8 BOM, UTF-16 BOMs, UTF-7)"
 license = "MIT"

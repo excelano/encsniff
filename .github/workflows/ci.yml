@@ -28,18 +28,23 @@ jobs:
   # workflow, because the floor is this crate's own: it is edition 2021's, which
   # is why it cannot drift upward without an edition bump moving it loudly.
   #
-  # No `--locked`, and the lockfile is moved aside. Two reasons, and the first
-  # one is why the second is safe. This crate has no runtime dependencies at
-  # all — `Cargo.lock`'s fourteen packages are `tempfile` and its tree, every
-  # one of them a dev-dependency `check --lib` does not build — so there is
-  # nothing for a resolver to choose differently and nothing `--locked` could
-  # protect. And the committed lockfile is version 4, which needs cargo 1.78 to
-  # parse; the declared minimum's cargo cannot read it, with or without the
-  # flag, which is how the first version of this job failed.
+  # The check runs against a manifest with the dev-dependencies stripped, and
+  # that is the point rather than a workaround. A published crate hands its
+  # consumers `[dependencies]` and never `[dev-dependencies]`: nobody linking
+  # `encsniff` resolves `tempfile`, so nobody linking it meets `tempfile`'s
+  # floor. The promise in `rust-version` is to those consumers, so the thing to
+  # check is what they get — this crate, which depends on nothing at all.
   #
-  # If this crate ever gains a runtime dependency, this stops being safe: put
-  # `--locked` back and generate a lockfile the old cargo can read, or the job
-  # will start failing for a resolver's choices rather than for this code.
+  # Two failures got here, both worth keeping. `--locked` failed because
+  # `Cargo.lock` is version 4 and needs cargo 1.78 to parse. Removing the
+  # lockfile then failed in the resolver — `cargo check --lib` does not *build*
+  # dev-dependencies, which is measurable, but cargo still *resolves* them, and
+  # 1.56 cannot satisfy `getrandom = ">=0.3.0, <0.5"` from `tempfile`'s tree.
+  # Neither failure was about this crate's code, which is the definition of a
+  # job testing the wrong thing.
+  #
+  # Everything is done on a copy under the runner's temp directory, so nothing
+  # here can leave a stripped manifest or a stale lockfile in the checkout.
   msrv:
     name: Builds on the declared minimum
     runs-on: ubuntu-latest
@@ -53,5 +58,21 @@ jobs:
           echo "MSRV=${msrv}" >> "$GITHUB_ENV"
       - name: The library builds on it
         run: |
-          mv Cargo.lock Cargo.lock.modern
+          consumer="${RUNNER_TEMP}/as-a-consumer-sees-it"
+          rm -rf "${consumer}"
+          mkdir -p "${consumer}"
+          cp -r Cargo.toml src "${consumer}/"
+
+          # Everything from `[dev-dependencies]` to the next section header.
+          python3 - "${consumer}/Cargo.toml" <<'STRIP'
+          import re, sys, pathlib
+          p = pathlib.Path(sys.argv[1])
+          s = p.read_text()
+          out = re.sub(r"(?ms)^\[dev-dependencies\].*?(?=^\[|\Z)", "", s)
+          assert "[dev-dependencies]" not in out, "the section survived"
+          p.write_text(out)
+          print("dev-dependencies stripped")
+          STRIP
+
+          cd "${consumer}"
           cargo +${{ env.MSRV }} check --lib
