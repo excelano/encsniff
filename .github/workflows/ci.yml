@@ -12,3 +12,35 @@ on:
 jobs:
   ci:
     uses: excelano/.github/.github/workflows/rust-lib-ci.yml@main
+
+  # The floor in Cargo.toml, checked rather than asserted.
+  #
+  # `Cargo.toml` argued there could be no such job, because the shared workflow
+  # runs tests and `cargo test` needs 1.63 — `tempfile` pulls `rustix`, which
+  # declares that floor — so a job would have to enforce a number this manifest
+  # does not claim. True of `cargo test`, and not of `cargo check --lib`, which
+  # does not build dev-dependencies at all. Measured 2026-08-27 from a clean
+  # target on a sibling crate: `check --lib` compiles `tempfile` zero times,
+  # `test --no-run` compiles it once.
+  #
+  # So this checks exactly the promise the manifest makes — that a consumer who
+  # links the library can build it on 1.56 — and nothing else. Not in the shared
+  # workflow, because the floor is this crate's own: it is edition 2021's, which
+  # is why it cannot drift upward without an edition bump moving it loudly.
+  #
+  # `--locked` so the lockfile is the one this crate ships. Without it, cargo is
+  # free to resolve a newer dependency that raises the floor, and the job would
+  # then fail for a reason that has nothing to do with this code.
+  msrv:
+    name: Builds on the declared minimum
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the declared minimum
+        run: |
+          msrv=$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)
+          echo "Cargo.toml declares ${msrv}"
+          rustup toolchain install "${msrv}" --profile minimal --no-self-update
+          echo "MSRV=${msrv}" >> "$GITHUB_ENV"
+      - name: The library builds on it
+        run: cargo +${{ env.MSRV }} check --locked --lib
