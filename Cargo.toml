@@ -24,6 +24,10 @@ edition = "2021"
 # the library at 1.56 and nothing else, which is exactly the promise this line
 # makes, and the floor is now verified on every push rather than on the day
 # somebody last remembered to try it.
+#
+# The job builds without the lockfile, which is safe only because this crate has
+# no runtime dependencies: there is nothing for a resolver to choose. A runtime
+# dependency would change that, and the job says so where it does it.
 rust-version = "1.56"
 description = "Detect common non-UTF-8 text encodings from byte-perfect signatures (UTF-8 BOM, UTF-16 BOMs, UTF-7)"
 license = "MIT"

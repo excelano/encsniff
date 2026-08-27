@@ -28,9 +28,18 @@ jobs:
   # workflow, because the floor is this crate's own: it is edition 2021's, which
   # is why it cannot drift upward without an edition bump moving it loudly.
   #
-  # `--locked` so the lockfile is the one this crate ships. Without it, cargo is
-  # free to resolve a newer dependency that raises the floor, and the job would
-  # then fail for a reason that has nothing to do with this code.
+  # No `--locked`, and the lockfile is moved aside. Two reasons, and the first
+  # one is why the second is safe. This crate has no runtime dependencies at
+  # all — `Cargo.lock`'s fourteen packages are `tempfile` and its tree, every
+  # one of them a dev-dependency `check --lib` does not build — so there is
+  # nothing for a resolver to choose differently and nothing `--locked` could
+  # protect. And the committed lockfile is version 4, which needs cargo 1.78 to
+  # parse; the declared minimum's cargo cannot read it, with or without the
+  # flag, which is how the first version of this job failed.
+  #
+  # If this crate ever gains a runtime dependency, this stops being safe: put
+  # `--locked` back and generate a lockfile the old cargo can read, or the job
+  # will start failing for a resolver's choices rather than for this code.
   msrv:
     name: Builds on the declared minimum
     runs-on: ubuntu-latest
@@ -43,4 +52,6 @@ jobs:
           rustup toolchain install "${msrv}" --profile minimal --no-self-update
           echo "MSRV=${msrv}" >> "$GITHUB_ENV"
       - name: The library builds on it
-        run: cargo +${{ env.MSRV }} check --locked --lib
+        run: |
+          mv Cargo.lock Cargo.lock.modern
+          cargo +${{ env.MSRV }} check --lib
