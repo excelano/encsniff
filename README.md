@@ -6,9 +6,8 @@ Companion to [`encsniff-go`](https://github.com/excelano/encsniff-go).
 
 ## Install
 
-```toml
-[dependencies]
-encsniff = "0.1"
+```sh
+cargo add encsniff
 ```
 
 ## Usage
