@@ -65,4 +65,4 @@ No heuristic encoding detection. CP1252 vs Latin-1, language-based detection, by
 
 ## License
 
-MIT. Author: David M. Anderson. Built with AI assistance (Claude, Anthropic).
+MIT. Author: David M. Anderson.
