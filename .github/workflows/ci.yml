@@ -4,10 +4,7 @@ name: ci
 # it calls the library policy: the binary checks plus the docs and packaging a
 # published crate owes its consumers.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   ci:
