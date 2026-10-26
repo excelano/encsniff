@@ -30,6 +30,9 @@
 //! # Ok(())
 //! # }
 //! ```
+//
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
 
 use std::ffi::OsString;
 use std::fmt;

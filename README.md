@@ -25,6 +25,12 @@ match s.action {
             eprintln!("hint: {}", hint);
         }
     }
+    Action::WarnUnknown => {
+        eprintln!("warning: file is not valid UTF-8, and its encoding could not be named.");
+        if let Some(hint) = &s.hint {
+            eprintln!("hint: {}", hint);
+        }
+    }
 }
 # Ok::<(), std::io::Error>(())
 ```
@@ -55,8 +61,8 @@ lead byte reads as clean, because it is indistinguishable from a character cut
 in half. Real legacy exports put high bytes in front of ASCII repeatedly, so
 they are flagged on the first such pair.
 
-A clean sniff still proves nothing about the rest of the file. This has always
-been a head-of-file check, so callers still need a decent error on the read path
+A clean sniff still proves nothing about the rest of the file. This is a
+head-of-file check, so callers still need a decent error on the read path
 and should not treat `UseAsIs` as a guarantee.
 
 ## What it does not do

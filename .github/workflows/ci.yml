@@ -3,6 +3,10 @@ name: ci
 # The checks live in excelano/.github. This crate is linked by other code, so
 # it calls the library policy: the binary checks plus the docs and packaging a
 # published crate owes its consumers.
+#
+# Author: David M. Anderson
+# Built with AI assistance (Claude, Anthropic)
+
 on:
   workflow_dispatch:
 
